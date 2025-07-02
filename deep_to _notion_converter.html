@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>참고문헌 → 노션 표 변환기</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; max-width: 800px; margin: auto; }
+    textarea { width: 100%; }
+    table { margin-top: 20px; width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #aaa; padding: 4px 8px; }
+    th { background: #f0f0f0; }
+    button { margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h2>참고문헌 → 노션 표 변환기</h2>
+  <textarea id="input" rows="10" placeholder="참고문헌을 여기에 붙여넣으세요"></textarea><br>
+  <button onclick="convert()">변환</button>
+  <button onclick="handleCopy()" id="copyBtn" disabled>복사</button>
+  <div id="tableArea"></div>
+  <script>
+    function parseReferences(input) {
+      const lines = input.split('\n');
+      const refs = [];
+      let buffer = [];
+      let refNum = 1;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        // 번호로 시작하는 줄을 새 참고문헌의 시작으로 간주
+        if (/^\d+\./.test(line) && buffer.length > 0) {
+          const ref = parseReferenceBlock(buffer.join(' '), refNum++);
+          if (ref) refs.push(ref);
+          buffer = [];
+        }
+        if (line !== '') buffer.push(line);
+      }
+      // 마지막 참고문헌 처리
+      if (buffer.length > 0) {
+        const ref = parseReferenceBlock(buffer.join(' '), refNum++);
+        if (ref) refs.push(ref);
+      }
+      return refs;
+    }
+
+    function parseReferenceBlock(text, 번호) {
+      // 링크 추출 (http, https, hps 모두 지원, 여러 줄에 걸쳐 있을 수 있음)
+      const linkMatch = text.match(/(https?:\/\/[^\s,]+|hps:\/\/[^\s,]+)/i);
+      let 출처 = '';
+      if (linkMatch) {
+        출처 = linkMatch[1].replace(/^hps:\/\//, 'https://');
+        text = text.replace(linkMatch[0], ''); // 링크 제거
+      }
+      // 날짜 추출 (4월 22, 2025 등 다양한 형태)
+      const dateMatch = text.match(/(\d{1,2})월\s?(\d{1,2}),?\s?(\d{4})/);
+      let 날짜 = '';
+      if (dateMatch) {
+        const month = dateMatch[1].padStart(2, '0');
+        const day = dateMatch[2].padStart(2, '0');
+        const year = dateMatch[3];
+        날짜 = `${year}.${month}.${day}`;
+        text = text.replace(dateMatch[0], ''); // 날짜 제거
+      }
+      // 문서명 추출 (번호, 날짜, 액세스, 링크 등 제거 후 남은 부분)
+      let 문서명 = text.replace(/^\d+\./, '')
+                      .replace(/에 액세스.*/,'')
+                      .replace(/\s+/g,' ')
+                      .replace(/,$/,'')
+                      .trim();
+      if (!문서명 || !날짜 || !출처) return null; // 필수 정보 없으면 무시
+      return { 번호, 문서명, 날짜, 출처, 참고: '' };
+    }
+
+    function convert() {
+      const input = document.getElementById('input').value;
+      const table = parseReferences(input);
+      const tableArea = document.getElementById('tableArea');
+      if (table.length === 0) {
+        tableArea.innerHTML = "<p>변환된 데이터가 없습니다.</p>";
+        document.getElementById('copyBtn').disabled = true;
+        return;
+      }
+      let html = '<table><thead><tr><th>일련번호</th><th>문서명</th><th>날짜</th><th>출처</th><th>참고</th></tr></thead><tbody>';
+      table.forEach(row => {
+        html += `<tr>
+          <td>${row.번호}</td>
+          <td>${row.문서명}</td>
+          <td>${row.날짜}</td>
+          <td><a href="${row.출처}" target="_blank">${row.출처}</a></td>
+          <td>${row.참고}</td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      tableArea.innerHTML = html;
+      document.getElementById('copyBtn').disabled = false;
+      // 저장
+      window._refTable = table;
+    }
+
+    function handleCopy() {
+      // 표를 HTML 테이블로 변환
+      const table = window._refTable || [];
+      if (!table.length) return;
+      let html = '<table><thead><tr><th>일련번호</th><th>문서명</th><th>날짜</th><th>출처</th><th>참고</th></tr></thead><tbody>';
+      table.forEach(row => {
+        html += `<tr>` +
+          `<td>${row.번호}</td>` +
+          `<td>${row.문서명}</td>` +
+          `<td>${row.날짜}</td>` +
+          `<td><a href="${row.출처}" target="_blank">${row.출처}</a></td>` +
+          `<td>${row.참고}</td>` +
+          `</tr>`;
+      });
+      html += '</tbody></table>';
+      // HTML 테이블을 클립보드에 복사
+      if (navigator.clipboard && window.ClipboardItem) {
+        const blob = new Blob([html], { type: 'text/html' });
+        const data = [
+          new ClipboardItem({ 'text/html': blob })
+        ];
+        navigator.clipboard.write(data).then(() => {
+          alert('HTML 테이블이 복사되었습니다! 노션에 표로 붙여넣으세요.');
+        }, () => {
+          alert('복사에 실패했습니다. 브라우저가 지원하지 않을 수 있습니다.');
+        });
+      } else {
+        // Fallback: plain text 복사
+        const header = "일련번호\t문서명\t날짜\t출처\t참고";
+        const rows = table.map(row =>
+          [row.번호, row.문서명, row.날짜, row.출처, row.참고].join('\t')
+        );
+        const text = [header, ...rows].join('\n');
+        navigator.clipboard.writeText(text);
+        alert('브라우저가 HTML 복사를 지원하지 않아 텍스트로 복사했습니다.');
+      }
+    }
+  </script>
+</body>
+</html>
